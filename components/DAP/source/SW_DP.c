@@ -47,6 +47,18 @@
 #include "components/DAP/include/spi_switch.h"
 #include "components/DAP/include/dap_utility.h"
 
+#ifdef CONFIG_IDF_TARGET_ESP8266
+// no space for esp8266
+#define IRAM_ATTR
+#endif
+
+#define likely(x)    __builtin_expect(!!(x), 1)
+#define unlikely(x)  __builtin_expect(!!(x), 0)
+#define UNROLL_2(x)  x x
+#define UNROLL_4(x)  UNROLL_2(x) UNROLL_2(x)
+#define UNROLL_8(x)  UNROLL_4(x) UNROLL_4(x)
+#define UNROLL_16(x) UNROLL_8(x) UNROLL_8(x)
+#define UNROLL_32(x) UNROLL_16(x) UNROLL_16(x)
 
 // Debug
 #define PRINT_SWD_PROTOCOL 0
@@ -61,37 +73,35 @@
 // Space for time in the original version,
 // and time for space in our implementation
 
-#define SW_CLOCK_CYCLE()                \
-  PIN_SWCLK_CLR();                      \
-  if (need_delay) { PIN_DELAY(); }      \
-  PIN_SWCLK_SET();                      \
-  if (need_delay) { PIN_DELAY(); }
+#define SW_CLOCK_CYCLE()                     \
+  PIN_SWCLK_CLR();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); } \
+  else { PIN_DELAY_FAST(); }                 \
+  PIN_SWCLK_SET();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); }
 
-#define SW_WRITE_BIT(bit)               \
-  PIN_SWDIO_OUT(bit);                   \
-  PIN_SWCLK_CLR();                      \
-  if (need_delay) { PIN_DELAY(); }      \
-  PIN_SWCLK_SET();                      \
-  if (need_delay) { PIN_DELAY(); }
+#define SW_WRITE_BIT(bit)                    \
+  PIN_SWDIO_OUT(bit);                        \
+  PIN_SWCLK_CLR();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); } \
+  PIN_SWCLK_SET();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); }
 
-#define SW_READ_BIT(bit)                \
-  PIN_SWCLK_CLR();                      \
-  if (need_delay) { PIN_DELAY(); }      \
-  bit = PIN_SWDIO_IN();                 \
-  PIN_SWCLK_SET();                      \
-  if (need_delay) { PIN_DELAY(); }
-
-
+#define SW_READ_BIT(bit)                     \
+  PIN_SWCLK_CLR();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); } \
+  else { PIN_DELAY_FAST(); }                 \
+  bit = PIN_SWDIO_IN();                      \
+  PIN_SWCLK_SET();                           \
+  if (unlikely(need_delay)) { PIN_DELAY(); }
 
 uint8_t SWD_TransferSpeed = kTransfer_GPIO_normal;
-
 
 void SWJ_Sequence_GPIO (uint32_t count, const uint8_t *data, uint8_t need_delay);
 void SWJ_Sequence_SPI (uint32_t count, const uint8_t *data);
 
 void SWD_Sequence_GPIO (uint32_t info, const uint8_t *swdo, uint8_t *swdi);
 void SWD_Sequence_SPI (uint32_t info, const uint8_t *swdo, uint8_t *swdi);
-
 
 // Generate SWJ Sequence
 //   count:  sequence bit count
@@ -113,8 +123,7 @@ void SWJ_Sequence (uint32_t count, const uint8_t *data) {
 
 }
 
-
-void SWJ_Sequence_GPIO (uint32_t count, const uint8_t *data, uint8_t need_delay) {
+void IRAM_ATTR SWJ_Sequence_GPIO (uint32_t count, const uint8_t *data, uint8_t need_delay) {
     uint32_t val;
     uint32_t n;
 
@@ -137,11 +146,9 @@ void SWJ_Sequence_GPIO (uint32_t count, const uint8_t *data, uint8_t need_delay)
 }
 
 void SWJ_Sequence_SPI (uint32_t count, const uint8_t *data) {
-  DAP_SPI_Enable();
   DAP_SPI_WriteBits(count, data);
 }
 #endif
-
 
 // Generate SWD Sequence
 //   info:   sequence information
@@ -157,7 +164,7 @@ void SWD_Sequence (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   }
 }
 
-void SWD_Sequence_GPIO (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
+void IRAM_ATTR SWD_Sequence_GPIO (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
   const uint8_t need_delay = 1;
 
   uint32_t val;
@@ -210,10 +217,7 @@ void SWD_Sequence_SPI (uint32_t info, const uint8_t *swdo, uint8_t *swdi) {
 
 #endif
 
-
 #if (DAP_SWD != 0)
-
-
 // SWD Transfer I/O
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
@@ -231,9 +235,6 @@ static uint8_t SWD_Transfer_SPI (uint32_t request, uint32_t *data) {
 
   const uint8_t constantBits = 0b10000001U; /* Start Bit  & Stop Bit & Park Bit is fixed. */
   uint8_t requestByte;  /* LSB */
-
-
-  DAP_SPI_Enable();
 
   requestByte = constantBits | (((uint8_t)(request & 0xFU)) << 1U) | (ParityEvenUint8(request & 0xFU) << 5U);
   /* For 4bit, Parity can be equivalent to 8bit with all 0 high bits */
@@ -318,13 +319,10 @@ static uint8_t SWD_Transfer_SPI (uint32_t request, uint32_t *data) {
     }
     else {
       /* Protocol error */
-      DAP_SPI_Disable();
       PIN_SWDIO_TMS_SET();
 
-      DAP_SPI_Enable();
       DAP_SPI_Protocol_Error_Read();
 
-      DAP_SPI_Disable();
       PIN_SWDIO_TMS_SET();
 #if (PRINT_SWD_PROTOCOL == 1)
       os_printf("Protocol Error: Read\r\n");
@@ -347,7 +345,6 @@ static uint8_t SWD_Transfer_SPI (uint32_t request, uint32_t *data) {
       n = DAP_Data.transfer.idle_cycles;
       if (n) { DAP_SPI_Generate_Cycle(n); }
 
-      DAP_SPI_Disable();
       PIN_SWDIO_TMS_SET();
 
       return ((uint8_t)ack);
@@ -363,13 +360,10 @@ static uint8_t SWD_Transfer_SPI (uint32_t request, uint32_t *data) {
     }
     else {
       /* Protocol error */
-      DAP_SPI_Disable();
       PIN_SWDIO_TMS_SET();
 
-      DAP_SPI_Enable();
       DAP_SPI_Protocol_Error_Write();
 
-      DAP_SPI_Disable();
       PIN_SWDIO_TMS_SET();
 
 #if (PRINT_SWD_PROTOCOL == 1)
@@ -384,9 +378,7 @@ static uint8_t SWD_Transfer_SPI (uint32_t request, uint32_t *data) {
   return DAP_TRANSFER_ERROR;
 }
 
-
-
-static uint8_t SWD_Transfer_GPIO (uint32_t request, uint32_t *data, uint8_t need_delay) {
+static uint8_t IRAM_ATTR SWD_Transfer_GPIO (uint32_t request, uint32_t *data, uint8_t need_delay) {
   uint32_t ack;
   uint32_t bit;
   uint32_t val;
@@ -433,12 +425,12 @@ static uint8_t SWD_Transfer_GPIO (uint32_t request, uint32_t *data, uint8_t need
       /* Read data */
       val = 0U;
       parity = 0U;
-      for (n = 32U; n; n--) {
+      UNROLL_32({
         SW_READ_BIT(bit);               /* Read RDATA[0:31] */
         parity += bit;
         val >>= 1;
         val  |= bit << 31;
-      }
+      })
       SW_READ_BIT(bit);                 /* Read Parity */
       if ((parity ^ bit) & 1U) {
         ack = DAP_TRANSFER_ERROR;
@@ -458,11 +450,11 @@ static uint8_t SWD_Transfer_GPIO (uint32_t request, uint32_t *data, uint8_t need
       /* Write data */
       val = *data;
       parity = 0U;
-      for (n = 32U; n; n--) {
+      UNROLL_32({
         SW_WRITE_BIT(val);              /* Write WDATA[0:31] */
         parity += val;
         val >>= 1;
-      }
+      })
       SW_WRITE_BIT(parity);             /* Write Parity Bit */
     }
     /* Capture Timestamp */
@@ -512,7 +504,6 @@ static uint8_t SWD_Transfer_GPIO (uint32_t request, uint32_t *data, uint8_t need
   return ((uint8_t)ack);
 }
 
-
 // SWD Transfer I/O
 //   request: A[3:2] RnW APnDP
 //   data:    DATA[31:0]
@@ -529,6 +520,5 @@ uint8_t  SWD_Transfer(uint32_t request, uint32_t *data) {
       return SWD_Transfer_GPIO(request, data, 1);
   }
 }
-
 
 #endif  /* (DAP_SWD != 0) */

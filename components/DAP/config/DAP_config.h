@@ -445,16 +445,16 @@ __STATIC_INLINE void PORT_JTAG_SETUP(void)
   // set TCK, TMS pin
   PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14); // GPIO14 is SPI CLK pin (Clock)
   GPIO.enable_w1ts |= (0x1 << 14); // PP Output
-  pin_reg.val = READ_PERI_REG(GPIO_PIN_REG(14));
-  pin_reg.pullup = 1;
-  WRITE_PERI_REG(GPIO_PIN_REG(14), pin_reg.val);
+  // pin_reg.val = READ_PERI_REG(GPIO_PIN_REG(14));
+  // pin_reg.pullup = 1;
+  // WRITE_PERI_REG(GPIO_PIN_REG(14), pin_reg.val);
 
   PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13); // GPIO13 is SPI MOSI pin (Master Data Out)
   GPIO.enable_w1ts |= (0x1 << 13);
-  GPIO.pin[13].driver = 1; // OD output
-  pin_reg.val = READ_PERI_REG(GPIO_PIN_REG(13));
-  pin_reg.pullup = 0;
-  WRITE_PERI_REG(GPIO_PIN_REG(13), pin_reg.val);
+  // GPIO.pin[13].driver = 1; // OD output
+  // pin_reg.val = READ_PERI_REG(GPIO_PIN_REG(13));
+  // pin_reg.pullup = 0;
+  // WRITE_PERI_REG(GPIO_PIN_REG(13), pin_reg.val);
 
 
   // use RTC pin 16
@@ -600,8 +600,6 @@ __STATIC_INLINE void PORT_SWD_SETUP(void)
 __STATIC_INLINE void PORT_OFF(void)
 {
   // Will be called when the DAP disconnected
-  DAP_SPI_Disable();
-
 #if defined CONFIG_IDF_TARGET_ESP8266
   // gpio_set_direction(PIN_nRESET, GPIO_MODE_OUTPUT_OD);
   GPIO.enable_w1tc |= (0x1 << PIN_nRESET);
@@ -651,7 +649,11 @@ __STATIC_FORCEINLINE uint32_t PIN_SWCLK_TCK_IN(void)
  */
 __STATIC_FORCEINLINE void PIN_SWCLK_TCK_SET(void)
 {
+#ifdef SWCLK_SET
+  SWCLK_SET();
+#else
   GPIO_SET_LEVEL_HIGH(PIN_SWCLK);
+#endif
 }
 
 /**
@@ -661,7 +663,11 @@ __STATIC_FORCEINLINE void PIN_SWCLK_TCK_SET(void)
  */
 __STATIC_FORCEINLINE void PIN_SWCLK_TCK_CLR(void)
 {
+#ifdef SWCLK_CLR
+  SWCLK_CLR();
+#else
   GPIO_SET_LEVEL_LOW(PIN_SWCLK);
+#endif
 }
 
 // SWDIO/TMS Pin I/O --------------------------------------
@@ -674,7 +680,11 @@ __STATIC_FORCEINLINE void PIN_SWCLK_TCK_CLR(void)
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN(void)
 {
   // Note that we only use mosi in GPIO mode
+#ifdef SWDIO_GET_IN
+  return SWDIO_GET_IN();
+#else
   return GPIO_GET_LEVEL(PIN_SWDIO_MOSI);
+#endif
 }
 
 /**
@@ -684,7 +694,11 @@ __STATIC_FORCEINLINE uint32_t PIN_SWDIO_TMS_IN(void)
  */
 __STATIC_FORCEINLINE void PIN_SWDIO_TMS_SET(void)
 {
+#ifdef SWDIO_SET
+  SWDIO_SET();
+#else
   GPIO_SET_LEVEL_HIGH(PIN_SWDIO_MOSI);
+#endif
 }
 
 /**
@@ -694,7 +708,11 @@ __STATIC_FORCEINLINE void PIN_SWDIO_TMS_SET(void)
  */
 __STATIC_FORCEINLINE void PIN_SWDIO_TMS_CLR(void)
 {
+#ifdef SWDIO_CLR
+  SWDIO_CLR();
+#else
   GPIO_SET_LEVEL_LOW(PIN_SWDIO_MOSI);
+#endif
 }
 
 /**
@@ -704,8 +722,7 @@ __STATIC_FORCEINLINE void PIN_SWDIO_TMS_CLR(void)
  */
 __STATIC_FORCEINLINE uint32_t PIN_SWDIO_IN(void)
 {
-  // Note that we only use mosi in GPIO mode
-  return GPIO_GET_LEVEL(PIN_SWDIO_MOSI);
+  return PIN_SWDIO_TMS_IN();
 }
 
 /**
@@ -723,15 +740,11 @@ __STATIC_FORCEINLINE void PIN_SWDIO_OUT(uint32_t bit)
 	  */
   if ((bit & 1U) == 1)
   {
-    //set bit
-    GPIO_SET_LEVEL_HIGH(PIN_SWDIO_MOSI);
-
+    PIN_SWDIO_TMS_SET();
   }
   else
   {
-    //reset bit
-    GPIO_SET_LEVEL_LOW(PIN_SWDIO_MOSI);
-
+    PIN_SWDIO_TMS_CLR();
   }
 }
 
@@ -743,10 +756,14 @@ __STATIC_FORCEINLINE void PIN_SWDIO_OUT(uint32_t bit)
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_ENABLE(void)
 {
   // set \ref gpio_set_direction -> OUTPUT
-  // GPIO.enable_w1ts |= (0x1 << PIN_SWDIO_MOSI);
-  // GPIO.pin[PIN_SWDIO_MOSI].driver = 0;
-  do {}while (0);
-
+#ifdef CONFIG_IDF_TARGET_ESP8266
+  GPIO.enable_w1ts = 0x01 << PIN_SWDIO_MOSI;
+#elif defined CONFIG_IDF_TARGET_ESP32
+  GPIO.enable_w1ts = 0x01 << PIN_SWDIO_MOSI;
+#elif defined CONFIG_IDF_TARGET_ESP32C3
+  SWDIO_OUT_ENABLE();
+#elif defined CONFIG_IDF_TARGET_ESP32S3
+#endif
 }
 
 /**
@@ -756,25 +773,15 @@ __STATIC_FORCEINLINE void PIN_SWDIO_OUT_ENABLE(void)
  */
 __STATIC_FORCEINLINE void PIN_SWDIO_OUT_DISABLE(void)
 {
-  // may be unuse.
   // set \ref gpio_set_dircetion -> INPUT
-  // esp8266 input is always connected
-  // GPIO.enable_w1tc |= (0x1 << PIN_SWDIO_MOSI);
-  // GPIO.pin[PIN_SWDIO_MOSI].driver = 0;
 #ifdef CONFIG_IDF_TARGET_ESP8266
-  GPIO.out_w1ts |= (0x1 << PIN_SWDIO_MOSI);
+  GPIO.enable_w1tc = 0x01 << PIN_SWDIO_MOSI;
 #elif defined CONFIG_IDF_TARGET_ESP32
   // Note that the input of esp32 is not always connected.
-  PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[PIN_SWDIO_MOSI]);
-  GPIO.out_w1ts = (0x1 << PIN_SWDIO_MOSI);
+  GPIO.enable_w1tc = 0x01 << PIN_SWDIO_MOSI;
 #elif defined CONFIG_IDF_TARGET_ESP32C3
-  // Note that the input of esp32c3 is not always connected.
-  PIN_INPUT_ENABLE(GPIO_PIN_MUX_REG[PIN_SWDIO_MOSI]);
-  GPIO.out_w1ts.out_w1ts = (0x1 << PIN_SWDIO_MOSI);
+  SWDIO_OUT_DISABLE();
 #elif defined CONFIG_IDF_TARGET_ESP32S3
-  // Note that the input is not always connected.
-  gpio_ll_input_enable(&GPIO, PIN_SWDIO_MOSI);
-  gpio_ll_set_level(&GPIO, PIN_SWDIO_MOSI, 1);
 #endif
 }
 
@@ -1008,15 +1015,16 @@ __STATIC_INLINE void DAP_SETUP(void)
   GPIO_FUNCTION_SET(PIN_nTRST);
   GPIO_FUNCTION_SET(PIN_nRESET);
 
-  // GPIO_FUNCTION_SET(PIN_LED_RUNNING);
-
-
-  // Configure: LED as output (turned off)
-
-  // GPIO_SET_DIRECTION_NORMAL_OUT(PIN_LED_RUNNING);
-
-  // LED_CONNECTED_OUT(0);
-  // LED_RUNNING_OUT(0);
+  /**
+   * The drive strength has a significant impact on signal integrity.
+   * In actual use, it is necessary to perform signal measurements
+   * on the board and select the appropriate drive strength.
+   */
+#if defined (CONFIG_IDF_TARGET_ESP32S3) || defined (CONFIG_IDF_TARGET_ESP32C3)
+  // 5mA for esp32c3/esp32s3
+  gpio_ll_set_drive_capability(&GPIO, PIN_SWCLK, GPIO_DRIVE_CAP_0);
+  gpio_ll_set_drive_capability(&GPIO, PIN_SWDIO_MOSI, GPIO_DRIVE_CAP_0);
+#endif
 
   PORT_OFF();
 }
